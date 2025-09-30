@@ -3,3 +3,5 @@ var a = ''
 b.forEach(el => {
   a += el.textContent; // or el.innerText if you want only visible text
 });
+
+//amazon.nova-lite-v1:0

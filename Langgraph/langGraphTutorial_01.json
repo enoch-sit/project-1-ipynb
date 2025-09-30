@@ -12,7 +12,14 @@
     "1. **Thought**: Reasons about what to do\n",
     "2. **Action**: Decides an action to take\n",
     "3. **Observation**: Receives result from action\n",
-    "4. **Repeat**: Continues until task is complete"
+    "4. **Repeat**: Continues until task is complete\n",
+    "\n",
+    "## Use Case: Customer Support Ticketing System\n",
+    "\n",
+    "Our agent will help manage customer support queries by:\n",
+    "- Looking up customer information\n",
+    "- Checking ticket statuses\n",
+    "- Performing calculations when needed"
    ]
   },
   {
@@ -72,25 +79,23 @@
     "# Test the Bedrock client with a simple message\n",
     "def call_bedrock(messages: List[Dict[str, str]], system: str = \"\") -> str:\n",
     "    \"\"\"\n",
-    "    Call AWS Bedrock Claude model with messages.\n",
+    "    Call AWS Bedrock using the Converse API.\n",
     "    \"\"\"\n",
-    "    body = {\n",
-    "        \"anthropic_version\": \"bedrock-2023-05-31\",\n",
-    "        \"max_tokens\": 4096,\n",
-    "        \"temperature\": 0,\n",
-    "        \"messages\": messages\n",
+    "    kwargs = {\n",
+    "        \"modelId\": \"amazon.nova-lite-v1:0\",\n",
+    "        \"messages\": messages,\n",
+    "        \"inferenceConfig\": {\n",
+    "            \"temperature\": 0,\n",
+    "            \"maxTokens\": 4096\n",
+    "        }\n",
     "    }\n",
     "    \n",
     "    if system:\n",
-    "        body[\"system\"] = system\n",
+    "        kwargs[\"system\"] = [{\"text\": system}]\n",
     "    \n",
-    "    response = bedrock_runtime.invoke_model(\n",
-    "        modelId=\"anthropic.claude-3-5-sonnet-20241022-v2:0\",\n",
-    "        body=json.dumps(body)\n",
-    "    )\n",
+    "    response = bedrock_runtime.converse(**kwargs)\n",
     "    \n",
-    "    response_body = json.loads(response['body'].read())\n",
-    "    return response_body['content'][0]['text']\n",
+    "    return response['output']['message']['content'][0]['text']\n",
     "\n",
     "# Test it\n",
     "test_response = call_bedrock([{\"role\": \"user\", \"content\": \"Hello, world!\"}])\n",
@@ -150,7 +155,7 @@
    "source": [
     "## Create the ReAct System Prompt\n",
     "\n",
-    "This prompt instructs the model how to use the Thought-Action-Observation loop."
+    "This prompt instructs the model how to use the Thought-Action-Observation loop for customer support tasks."
    ]
   },
   {
@@ -173,29 +178,43 @@
     "e.g. calculate: 4 * 7 / 3\n",
     "Runs a calculation and returns the number - uses Python so be sure to use floating point syntax if necessary\n",
     "\n",
-    "average_dog_weight:\n",
-    "e.g. average_dog_weight: Collie\n",
-    "returns average weight of a dog when given the breed\n",
+    "get_customer_info:\n",
+    "e.g. get_customer_info: CUST12345\n",
+    "Returns customer information including name, plan type, and account status when given a customer ID\n",
+    "\n",
+    "get_ticket_status:\n",
+    "e.g. get_ticket_status: TKT98765\n",
+    "Returns the current status and details of a support ticket when given a ticket ID\n",
     "\n",
     "Example session:\n",
     "\n",
-    "Question: How much does a Bulldog weigh?\n",
-    "Thought: I should look the dog's weight using average_dog_weight\n",
-    "Action: average_dog_weight: Bulldog\n",
+    "Question: What is the status of ticket TKT98765 for customer CUST12345?\n",
+    "Thought: I need to first get the customer information, then check the ticket status\n",
+    "Action: get_customer_info: CUST12345\n",
     "PAUSE\n",
     "\n",
     "You will be called again with this:\n",
     "\n",
-    "Observation: A Bulldog weighs 51 lbs\n",
+    "Observation: Customer: Sarah Johnson, Plan: Premium, Status: Active\n",
+    "\n",
+    "You then continue:\n",
+    "\n",
+    "Thought: Now I have the customer info, let me check the ticket status\n",
+    "Action: get_ticket_status: TKT98765\n",
+    "PAUSE\n",
+    "\n",
+    "You will be called again with this:\n",
+    "\n",
+    "Observation: Ticket TKT98765: Status: In Progress, Issue: Billing inquiry, Priority: Medium, Assigned to: Agent Mike\n",
     "\n",
     "You then output:\n",
     "\n",
-    "Answer: A Bulldog weighs 51 lbs\n",
+    "Answer: Ticket TKT98765 belongs to Sarah Johnson (Premium plan, Active status). The ticket is currently In Progress, regarding a billing inquiry with Medium priority, and is assigned to Agent Mike.\n",
     "\"\"\".strip()\n",
     "\n",
     "print(\"✓ System prompt defined\")\n",
     "print(\"\\nPrompt preview:\")\n",
-    "print(prompt[:200] + \"...\")"
+    "print(prompt[:300] + \"...\")"
    ]
   },
   {
@@ -219,25 +238,41 @@
     "    \"\"\"\n",
     "    return eval(operation)\n",
     "\n",
-    "def average_dog_weight(breed: str) -> str:\n",
+    "def get_customer_info(customer_id: str) -> str:\n",
     "    \"\"\"\n",
-    "    Return the average weight of a dog breed.\n",
+    "    Return customer information based on customer ID.\n",
     "    This is a mock implementation with hardcoded values.\n",
     "    \"\"\"\n",
-    "    breed = breed.strip().lower()\n",
+    "    customer_id = customer_id.strip().upper()\n",
     "    \n",
-    "    weights = {\n",
-    "        'scottish terrier': '20 lbs',\n",
-    "        'border collie': '37 lbs',\n",
-    "        'toy poodle': '7 lbs'\n",
+    "    customers = {\n",
+    "        'CUST12345': 'Customer: Sarah Johnson, Plan: Premium, Status: Active',\n",
+    "        'CUST67890': 'Customer: John Smith, Plan: Basic, Status: Active',\n",
+    "        'CUST11111': 'Customer: Emily Davis, Plan: Enterprise, Status: Active'\n",
     "    }\n",
     "    \n",
-    "    return weights.get(breed, f\"Unknown breed: {breed}\")\n",
+    "    return customers.get(customer_id, f\"Customer not found: {customer_id}\")\n",
+    "\n",
+    "def get_ticket_status(ticket_id: str) -> str:\n",
+    "    \"\"\"\n",
+    "    Return ticket status and details based on ticket ID.\n",
+    "    This is a mock implementation with hardcoded values.\n",
+    "    \"\"\"\n",
+    "    ticket_id = ticket_id.strip().upper()\n",
+    "    \n",
+    "    tickets = {\n",
+    "        'TKT98765': 'Ticket TKT98765: Status: In Progress, Issue: Billing inquiry, Priority: Medium, Assigned to: Agent Mike',\n",
+    "        'TKT11111': 'Ticket TKT11111: Status: Resolved, Issue: Password reset, Priority: Low, Assigned to: Agent Lisa',\n",
+    "        'TKT22222': 'Ticket TKT22222: Status: Open, Issue: Feature request, Priority: High, Assigned to: Agent Tom'\n",
+    "    }\n",
+    "    \n",
+    "    return tickets.get(ticket_id, f\"Ticket not found: {ticket_id}\")\n",
     "\n",
     "# Dictionary mapping action names to functions\n",
     "known_actions = {\n",
     "    \"calculate\": calculate,\n",
-    "    \"average_dog_weight\": average_dog_weight\n",
+    "    \"get_customer_info\": get_customer_info,\n",
+    "    \"get_ticket_status\": get_ticket_status\n",
     "}\n",
     "\n",
     "print(\"✓ Tools defined:\")\n",
@@ -264,7 +299,7 @@
     "agent = Agent(system=prompt)\n",
     "\n",
     "# Step 1: Ask the question\n",
-    "result = agent(\"How much does a toy poodle weigh?\")\n",
+    "result = agent(\"What is the status of ticket TKT98765?\")\n",
     "print(\"Step 1 - Agent's first response:\")\n",
     "print(result)\n",
     "print(\"\\n\" + \"=\"*50 + \"\\n\")"
@@ -339,7 +374,7 @@
     "agent = Agent(system=prompt)\n",
     "\n",
     "# Ask a complex question\n",
-    "question = \"I have two dogs, a border collie and a Scottish terrier. What is their combined weight?\"\n",
+    "question = \"Get me the details for customer CUST12345 and their ticket TKT98765\"\n",
     "result = agent(question)\n",
     "print(\"Question:\", question)\n",
     "print(\"\\nAgent response:\")\n",
@@ -416,7 +451,9 @@
    "cell_type": "markdown",
    "metadata": {},
    "source": [
-    "## Run the Automated Agent"
+    "## Run the Automated Agent\n",
+    "\n",
+    "Let's test the agent with various customer support scenarios."
    ]
   },
   {
@@ -425,8 +462,8 @@
    "metadata": {},
    "outputs": [],
    "source": [
-    "# Simple question\n",
-    "result = query(\"How much does a toy poodle weigh?\")"
+    "# Simple question - check ticket status\n",
+    "result = query(\"What is the status of ticket TKT98765?\")"
    ]
   },
   {
@@ -436,7 +473,7 @@
    "outputs": [],
    "source": [
     "# Complex question requiring multiple steps\n",
-    "result = query(\"I have two dogs, a border collie and a Scottish terrier. What is their combined weight?\")"
+    "result = query(\"Get me the details for customer CUST12345 and their ticket TKT98765\")"
    ]
   },
   {
@@ -445,8 +482,38 @@
    "metadata": {},
    "outputs": [],
    "source": [
-    "# Question requiring calculation\n",
-    "result = query(\"What is 37 multiplied by 42, divided by 3?\")"
+    "# Question about customer information\n",
+    "result = query(\"Who is customer CUST67890 and what plan are they on?\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Multiple ticket statuses\n",
+    "result = query(\"What are the statuses of tickets TKT11111 and TKT22222?\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Question with calculation\n",
+    "result = query(\"If we have 15 high priority tickets and 23 medium priority tickets, what's the total number of tickets?\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Complex scenario with customer info and calculation\n",
+    "result = query(\"Customer CUST11111 has 3 open tickets and customer CUST67890 has 5 open tickets. What's their combined ticket count?\")"
    ]
   },
   {
@@ -457,18 +524,40 @@
     "\n",
     "In this notebook, we built a ReAct agent from scratch that:\n",
     "\n",
-    "1. **Thinks** about problems using natural language reasoning\n",
-    "2. **Acts** by calling available tools/functions\n",
+    "1. **Thinks** about customer support problems using natural language reasoning\n",
+    "2. **Acts** by calling available tools/functions:\n",
+    "   - `get_customer_info`: Retrieves customer details\n",
+    "   - `get_ticket_status`: Checks support ticket information\n",
+    "   - `calculate`: Performs mathematical operations\n",
     "3. **Observes** the results of those actions\n",
     "4. **Repeats** until it can provide a final answer\n",
     "\n",
-    "Key components:\n",
+    "### Key Components:\n",
+    "\n",
     "- **Agent Class**: Manages conversation history and model calls\n",
     "- **System Prompt**: Instructs the model on the ReAct pattern\n",
-    "- **Tools**: Functions the agent can call (calculate, average_dog_weight)\n",
+    "- **Tools**: Functions the agent can call (customer info, ticket status, calculations)\n",
     "- **Query Loop**: Automates the Thought-Action-Observation cycle\n",
     "\n",
-    "This is a foundation for building more sophisticated agents with additional tools and capabilities!"
+    "### Real-World Applications:\n",
+    "\n",
+    "This pattern can be extended for:\n",
+    "- **Customer Support**: Automated ticket triage and information lookup\n",
+    "- **E-commerce**: Order tracking, inventory management\n",
+    "- **Data Analysis**: Query databases, perform calculations, generate reports\n",
+    "- **DevOps**: System monitoring, log analysis, incident response\n",
+    "\n",
+    "The ReAct pattern is powerful because it combines:\n",
+    "- Natural language understanding (LLM)\n",
+    "- Structured tool execution (Python functions)\n",
+    "- Iterative problem-solving (loop until complete)\n",
+    "\n",
+    "This foundation can be extended with:\n",
+    "- Database connections\n",
+    "- API integrations\n",
+    "- More sophisticated tools\n",
+    "- Error handling and retries\n",
+    "- Conversation memory and context"
    ]
   }
  ],
